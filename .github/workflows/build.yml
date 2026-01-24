@@ -1,0 +1,39 @@
+name: Player e
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.13' 
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    # 4. 执行打包 (关键步骤)
+    # --onefile: 打包成单文件
+    # --noconsole: 运行时不显示黑框
+    # --add-data: 强行把 fonts 文件夹打包进去
+    # --collect-all: 自动收集 tkinterdnd2 的所有依赖 (否则拖放会报错)
+    - name: pyInstaller
+      run: |
+        pyinstaller --noconsole --onefile --name "MusicPro" --add-data "fonts;fonts" --collect-all tkinterdnd2 main.py
+
+    # 5. 上传生成的 exe 文件供下载
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MusicPro-Executable
+        path: dist/MusicPro.exe

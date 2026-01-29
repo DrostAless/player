@@ -8,7 +8,7 @@ import customtkinter as ctk
 import pygame
 from PIL import Image, ImageTk
 import math
-
+import splash
 import config
 import utils
 import metadata
@@ -421,5 +421,12 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         self.after(500, self.monitor)
 
 if __name__ == "__main__":
+    # 显示开屏页面
+    splash_screen = splash.SplashScreen()
+    splash_screen.show()
+    
+    # 启动主应用
     app = MusicPlayer()
     app.mainloop()
+
+

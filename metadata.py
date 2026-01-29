@@ -3,6 +3,9 @@ import os
 import io
 import re
 from PIL import Image
+from mutagen.mp3 import MP3, EasyMP3 
+from mutagen.flac import FLAC
+from mutagen.mp4 import MP4
 from mutagen.id3 import ID3, APIC
 from mutagen import File as MutagenFile
 
@@ -15,23 +18,69 @@ def get_default_cover():
     return Image.new('RGB', (800, 800), color='#222222')
 
 def get_track_info(path):
-    title = os.path.basename(path)
-    artist = "Unknown"
+    # 默认值
+    title = os.path.basename(path) # 默认用文件名
+    if "." in title: title = title.rsplit(".", 1)[0] # 去掉后缀
+    
+    artist = "Unknown Artist"
     duration = 0
     cover = get_default_cover()
 
-    if TinyTag:
-        try:
-            t = TinyTag.get(path, image=True)
-            if t.title: title = t.title
-            if t.artist: artist = t.artist
-            if t.duration: duration = t.duration
-        except: pass
-    
-    size = os.path.getsize(path)
-    if duration < 15 and size > 1024*1024:
-        duration = size / (16*1024)
+    # --- 🟢 阶段 1: 读取时长 (保持之前的修复) ---
+    try:
+        if path.lower().endswith('.mp3'):
+            audio = MP3(path)
+            duration = audio.info.length
+        elif path.lower().endswith('.flac'):
+            audio = FLAC(path)
+            duration = audio.info.length
+        elif path.lower().endswith('.m4a'):
+            audio = MP4(path)
+            duration = audio.info.length
+        else:
+            audio = MutagenFile(path)
+            if audio and audio.info: duration = audio.info.length
+    except: pass
 
+    # 异常时长修正
+    file_size = os.path.getsize(path)
+    if duration <= 0 or (duration > 600 and file_size < 10*1024*1024):
+        duration = (file_size * 8) / 128000 
+
+    # --- 🟢 阶段 2: 增强版标签读取 (优先 Mutagen EasyID3) ---
+    # 这种方式对中文支持最好，且能自动处理 ID3v1/v2
+    try:
+        if path.lower().endswith('.mp3'):
+            # EasyMP3 封装了常用的标签读取
+            tags = EasyMP3(path)
+            if 'title' in tags and tags['title']: 
+                title = tags['title'][0]
+            if 'artist' in tags and tags['artist']: 
+                artist = tags['artist'][0]
+        
+        elif path.lower().endswith('.flac'):
+            audio = FLAC(path)
+            if 'title' in audio: title = audio['title'][0]
+            if 'artist' in audio: artist = audio['artist'][0]
+            
+        elif path.lower().endswith('.m4a'):
+            audio = MP4(path)
+            # m4a 的键名比较特殊
+            if '\xa9nam' in audio: title = audio['\xa9nam'][0] # title
+            if '\xa9ART' in audio: artist = audio['\xa9ART'][0] # artist
+            
+        else:
+            # 如果上面都失败，尝试 TinyTag
+            if TinyTag:
+                t = TinyTag.get(path)
+                if t.title: title = t.title
+                if t.artist: artist = t.artist
+
+    except Exception as e:
+        print(f"Tag Read Error: {e}")
+        # 如果读取出错，保持默认文件名
+
+    # --- 阶段 3: 读取封面 (保持不变) ---
     try:
         f = MutagenFile(path)
         pil = None
@@ -45,8 +94,7 @@ def get_track_info(path):
         elif f.tags and 'covr' in f.tags:
             pil = Image.open(io.BytesIO(f.tags['covr'][0]))
         
-        if pil:
-            cover = pil.convert("RGB")
+        if pil: cover = pil.convert("RGB")
     except: pass
 
     return title, artist, duration, cover

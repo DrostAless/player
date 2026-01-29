@@ -13,6 +13,9 @@ MARGIN_RATIO = 1/7       # 边距比例
 LYRIC_LINE_HEIGHT = 32
 LYRIC_FONT_SIZE = 16
 LYRIC_FONT_SIZE_SUB = 13
+LYRIC_SMOOTHING = 0.05  # 滚动平滑度 (0.1-0.2 之间最丝滑)
+LYRIC_REFRESH_RATE = 4 # 刷新率 (约 60 FPS)
+
 
 # 颜色设置 (补全了缺失的变量)
 COLOR_BG_DEFAULT = "#1a1a1a"

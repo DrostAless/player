@@ -1,6 +1,7 @@
 # main.py
 import sys
 import os
+import re
 import tkinter as tk
 from tkinter import messagebox, filedialog
 import customtkinter as ctk 
@@ -88,13 +89,12 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         self.id_title = self.canvas.create_text(0, 0, text="Ready", font=f_main, fill="white", anchor="center")
         self.id_artist = self.canvas.create_text(0, 0, text="Drag & Drop music", font=f_sub, fill="#DDDDDD", anchor="center")
         
-        # 歌词
-        f_lrc_m = (utils.REAL_FONT_NAME, 15, "bold")
-        f_lrc_s = (utils.REAL_FONT_NAME, 12)
-        self.id_lrc_prev = self.canvas.create_text(0, 0, text="", font=f_lrc_s, fill="#888888", anchor="center")
-        self.id_lrc_curr = self.canvas.create_text(0, 0, text="♪", font=f_lrc_m, fill="#DDDDDD", anchor="center")
-        self.id_lrc_next = self.canvas.create_text(0, 0, text="", font=f_lrc_s, fill="#888888", anchor="center")
+        # 歌词Canvas - 用于滚动歌词显示
+        self.lyric_items = []
+        self.lyric_scroll_offset = 0      # 当前滚动位置 (像素)
+        self.target_scroll_offset = 0     # 目标滚动位置 (像素)
         
+
         # 时间
         f_time = (utils.REAL_FONT_NAME, 11)
         self.id_time_curr = self.canvas.create_text(0, 0, text="0:00", font=f_time, fill="#DDDDDD", anchor="w")
@@ -119,6 +119,9 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         self.canvas.tag_bind(self.id_prog_hitbox, "<Leave>", lambda e: self.canvas.config(cursor=""))
 
         self.bind("<Configure>", self.on_resize)
+
+        # 启动动画循环
+        self.animate_lyrics() 
         
         self.update_visuals(self.original_cover)
         self.monitor()
@@ -152,30 +155,24 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
             return os.path.join(sys._MEIPASS, relative_path)
         return os.path.join(os.path.abspath("."), relative_path)
 
-    # --- 🟢 布局更新 (Layout Tweaks) ---
     def update_layout(self):
         w = self.winfo_width(); h = self.winfo_height()
         if w < 100: w = config.START_WIDTH; h = config.START_HEIGHT
         cx = w / 2
         
-        # 1. 封面 (保持不动)
+        # 1. 封面
         cover_y = h * 0.26
         self.canvas.coords(self.id_cover, cx, cover_y)
         
-        # 2. 信息 (保持不动)
+        # 2. 信息
         info_start_y = h * 0.49
         self.canvas.coords(self.id_title, cx, info_start_y)
         self.canvas.coords(self.id_artist, cx, info_start_y + 30)
+
+        # 3. 歌词区域（直接在主Canvas上，调用绘制）
+        self.draw_lyrics_on_canvas()
         
-        # 3. 🟢 歌词下移 (+20px)
-        # 之前是 +80，现在 +100，离歌手名远一点
-        lrc_start_y = h * 0.63
-        self.canvas.coords(self.id_lrc_prev, cx, lrc_start_y - 30)
-        self.canvas.coords(self.id_lrc_curr, cx, lrc_start_y)
-        self.canvas.coords(self.id_lrc_next, cx, lrc_start_y + 30)
-        
-        # 4. 🟢 进度条上移 (-20px)
-        # 之前是 h-140，现在 h-160
+        # 4. 进度条
         prog_y = h * 0.73
         margin_x = 40
         self.prog_x_start = margin_x
@@ -183,40 +180,112 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         self.prog_width = self.prog_x_end - self.prog_x_start
         
         self.canvas.coords(self.id_prog_bg, self.prog_x_start, prog_y, self.prog_x_end, prog_y)
+        self.canvas.coords(self.id_prog_fg, self.prog_x_start, prog_y, self.prog_x_start, prog_y)
         self.canvas.coords(self.id_prog_hitbox, self.prog_x_start, prog_y, self.prog_x_end, prog_y)
         
-        self.canvas.coords(self.id_time_curr, margin_x, prog_y + 15)
-        self.canvas.coords(self.id_time_total, w - margin_x, prog_y + 15)
+        # 5. 时间
+        time_y = prog_y + 20
+        self.canvas.coords(self.id_time_curr, self.prog_x_start, time_y)
+        self.canvas.coords(self.id_time_total, self.prog_x_end, time_y)
         
-        # 5. 🟢 按钮上移 (-20px)
-        # 之前是 h-70，现在 h-90 (跟随进度条)
-        btn_y = h * 0.81
-        gap = 70
+        # 6. 按钮
+        btn_y = h * 0.82
+        btn_spacing = 90
+        self.canvas.coords(self.btn_objects["prev"]["id"], cx - btn_spacing, btn_y)
         self.canvas.coords(self.btn_objects["play"]["id"], cx, btn_y)
-        self.canvas.coords(self.btn_objects["prev"]["id"], cx - gap, btn_y)
-        self.canvas.coords(self.btn_objects["next"]["id"], cx + gap, btn_y)
+        self.canvas.coords(self.btn_objects["next"]["id"], cx + btn_spacing, btn_y)
         
-        # Import 按钮位置微调
-        self.canvas.coords(self.btn_objects["import"]["id"], cx, h - 30)
+        import_y = h - 35
+        self.canvas.coords(self.btn_objects["import"]["id"], cx, import_y)
 
-    def update_visuals(self, pil_img=None):
+    def update_visuals(self, new_cover):
+        if new_cover is None:
+            new_cover = self.original_cover
+        else:
+            self.original_cover = new_cover
+
         w = self.winfo_width(); h = self.winfo_height()
         if w < 100: w = config.START_WIDTH; h = config.START_HEIGHT
 
-        if pil_img:
-            self.original_cover = pil_img
-            self.tiny_cover = pil_img.resize((40, 40), Image.Resampling.BILINEAR)
-        
-        bg_img = utils.process_background(self.tiny_cover, w, h)
-        self.tk_bg_ref = ImageTk.PhotoImage(bg_img) 
+        # 背景
+        bg_img = utils.process_background(new_cover, w, h)
+        self.tk_bg_ref = ImageTk.PhotoImage(bg_img)
         self.canvas.itemconfig(self.id_bg, image=self.tk_bg_ref)
-        
-        target_size = int(min(w * 0.7, h * 0.4))
-        cover_resized = self.original_cover.resize((target_size, target_size), Image.Resampling.BICUBIC)
+
+        # 封面
+        max_size = int(w * config.WIDTH_RATIO)
+        max_h = int(h * config.ALBUM_HEIGHT_RATIO)
+        size = min(max_size, max_h)
+        cover_resized = new_cover.resize((size, size), Image.Resampling.LANCZOS)
         self.tk_cover_ref = ImageTk.PhotoImage(cover_resized)
         self.canvas.itemconfig(self.id_cover, image=self.tk_cover_ref)
-        
+
         self.update_layout()
+
+    def draw_lyrics_on_canvas(self):
+        """在主Canvas上绘制歌词（Apple Music风格）"""
+        # 清除旧的歌词对象
+        for item_id in self.lyric_items:
+            self.canvas.delete(item_id)
+        self.lyric_items = []
+
+        w = self.winfo_width(); h = self.winfo_height()
+        if w < 100: w = config.START_WIDTH; h = config.START_HEIGHT
+        cx = w / 2
+
+        if not self.time_points:
+            # 无歌词时显示音符
+            lrc_y = h * 0.60
+            item_id = self.canvas.create_text(
+                cx, lrc_y, text="♪",
+                font=(utils.REAL_FONT_NAME, 20),
+                fill="#888888", anchor="center"
+            )
+            self.lyric_items.append(item_id)
+            return
+
+        # 歌词区域的中心Y坐标
+        lrc_center_y = h * 0.63
+
+        # 显示5行以实现平滑过渡：上上行、上一行、当前行、下一行、下下行
+        for offset in [-2, -1, 0, 1, 2]:
+            idx = self.active_lyric_index + offset
+            if 0 <= idx < len(self.time_points):
+                t = self.time_points[idx]
+                text = self.lyrics_map[t]
+
+                # Y坐标 = 中心 + 相对偏移 + 滚动动画偏移
+                y_pos = lrc_center_y + (offset * config.LYRIC_LINE_HEIGHT) + self.lyric_scroll_offset
+
+                # 只绘制中间可见的区域（动态调整，在滚动时扩大下方范围）
+                visible_range = config.LYRIC_LINE_HEIGHT * 1.38
+                if lrc_center_y - visible_range < y_pos < lrc_center_y + visible_range:
+                    is_active = (idx == self.active_lyric_index)
+                    color = "white" if is_active else "#888888"
+                    size = config.LYRIC_FONT_SIZE if is_active else config.LYRIC_FONT_SIZE_SUB
+                    weight = "bold" if is_active else "normal"
+
+                    item_id = self.canvas.create_text(
+                        cx, y_pos, text=text,
+                        font=(utils.REAL_FONT_NAME, size, weight),
+                        fill=color, anchor="center", width=w-80
+                    )
+                    self.lyric_items.append(item_id)
+
+
+
+    def animate_lyrics(self):
+        """每一帧平滑更新滚动位置"""
+        # 计算当前位置与目标位置的差距
+        diff = self.target_scroll_offset - self.lyric_scroll_offset
+        
+        # 如果差距大于 0.5 像素，则继续滑动
+        if abs(diff) > 0.5:
+            self.lyric_scroll_offset += diff * config.LYRIC_SMOOTHING
+            self.draw_lyrics_on_canvas()
+        
+        # 保持 60FPS 循环
+        self.after(config.LYRIC_REFRESH_RATE, self.animate_lyrics)
 
     def on_resize(self, event):
         if event.widget == self:
@@ -283,9 +352,11 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         
         self.lyrics_map, self.time_points = metadata.get_lyrics(path)
         self.active_lyric_index = -1
-        self.canvas.itemconfig(self.id_lrc_prev, text="")
-        self.canvas.itemconfig(self.id_lrc_curr, text="♪")
-        self.canvas.itemconfig(self.id_lrc_next, text="")
+        
+        # 重置滚动位置
+        self.lyric_scroll_offset = 0
+        self.target_scroll_offset = 0
+        self.draw_lyrics_on_canvas()
 
         self.update_visuals(c)
 
@@ -331,20 +402,18 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
                 rem = max(0, self.total_duration - curr)
                 self.canvas.itemconfig(self.id_time_total, text=f"-{utils.fmt_time(rem)}")
                 
+                # 更新歌词
                 if self.time_points:
                     new_idx = -1
                     for i, t in enumerate(self.time_points):
                         if t <= curr: new_idx = i
                         else: break
+                    
                     if new_idx != -1 and new_idx != self.active_lyric_index:
                         self.active_lyric_index = new_idx
-                        prev = self.lyrics_map[self.time_points[new_idx-1]] if new_idx > 0 else ""
-                        curr_txt = self.lyrics_map[self.time_points[new_idx]]
-                        next_txt = self.lyrics_map[self.time_points[new_idx+1]] if new_idx + 1 < len(self.time_points) else ""
-                        
-                        self.canvas.itemconfig(self.id_lrc_prev, text=prev)
-                        self.canvas.itemconfig(self.id_lrc_curr, text=curr_txt)
-                        self.canvas.itemconfig(self.id_lrc_next, text=next_txt)
+                        # 核心：更新目标滚动位置 = 当前索引 * 行高
+                        self.lyric_scroll_offset = config.LYRIC_LINE_HEIGHT
+                        self.target_scroll_offset = 0
 
                 if not pygame.mixer.music.get_busy() and (self.total_duration - curr) < 1:
                     self.next_song()

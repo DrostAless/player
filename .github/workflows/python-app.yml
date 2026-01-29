@@ -29,7 +29,7 @@ jobs:
 
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --noconsole --onefile --name "MusicPro" --icon="app_icon.ico" --add-data "app_icon.ico;." --collect-all tkinterdnd2 main.py
+        pyinstaller --noconsole --onefile --name "Music" --icon="app_icon.ico" --add-data "app_icon.ico;." --collect-all tkinterdnd2 main.py
 
 
 
@@ -37,5 +37,5 @@ jobs:
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: MusicPro-Executable
-        path: dist/MusicPro.exe
+        name: Music
+        path: dist/Music.exe

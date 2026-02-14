@@ -51,7 +51,7 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
 
         # State
         self.playlist = []
-        self.current_index = 0
+        self.current_index = -1  # -1 表示没有当前播放的歌曲
         self.is_playing = False
         self.is_dragging = False
         self.total_duration = 1 
@@ -163,17 +163,17 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         # 1. 封面
         cover_y = h * 0.26
         self.canvas.coords(self.id_cover, cx, cover_y)
-        
+
         # 2. 信息
-        info_start_y = h * 0.49
+        info_start_y = h * 0.52  # 增加信息区域下移距离
         self.canvas.coords(self.id_title, cx, info_start_y)
-        self.canvas.coords(self.id_artist, cx, info_start_y + 30)
+        self.canvas.coords(self.id_artist, cx, info_start_y + 35)  # 增加标题与艺术家间距
 
         # 3. 歌词区域（直接在主Canvas上，调用绘制）
         self.draw_lyrics_on_canvas()
         
         # 4. 进度条
-        prog_y = h * 0.73
+        prog_y = h * 0.74  # 向上移动进度条，与歌词保持合适间距
         margin_x = 40
         self.prog_x_start = margin_x
         self.prog_x_end = w - margin_x
@@ -189,13 +189,13 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         self.canvas.coords(self.id_time_total, self.prog_x_end, time_y)
         
         # 6. 按钮
-        btn_y = h * 0.82
+        btn_y = h * 0.82  # 向上移动控制按钮区域
         btn_spacing = 90
         self.canvas.coords(self.btn_objects["prev"]["id"], cx - btn_spacing, btn_y)
         self.canvas.coords(self.btn_objects["play"]["id"], cx, btn_y)
         self.canvas.coords(self.btn_objects["next"]["id"], cx + btn_spacing, btn_y)
-        
-        import_y = h - 35
+
+        import_y = h - 50  # 上移导入按钮增加与底部间距
         self.canvas.coords(self.btn_objects["import"]["id"], cx, import_y)
 
     def update_visuals(self, new_cover):
@@ -278,12 +278,12 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         """每一帧平滑更新滚动位置"""
         # 计算当前位置与目标位置的差距
         diff = self.target_scroll_offset - self.lyric_scroll_offset
-        
+
         # 如果差距大于 0.5 像素，则继续滑动
         if abs(diff) > 0.5:
             self.lyric_scroll_offset += diff * config.LYRIC_SMOOTHING
             self.draw_lyrics_on_canvas()
-        
+
         # 保持 60FPS 循环
         self.after(config.LYRIC_REFRESH_RATE, self.animate_lyrics)
 
@@ -327,14 +327,25 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
                 if os.path.exists(p.strip('{}')): valid.append(p.strip('{}'))
         valid = [f for f in valid if f.lower().endswith(('.mp3', '.wav', '.flac', '.m4a'))]
         if valid:
+            # 将新文件添加到播放列表末尾
+            new_count = len(valid)
             self.playlist.extend(valid)
-            if len(self.playlist) == len(valid): self.current_index = 0; self.play_index(0)
+            # 如果当前没有播放或播放列表只有新添加的歌曲，则播放第一首
+            if self.current_index == -1 or len(self.playlist) == new_count:
+                self.current_index = 0
+                self.play_index(0)
 
     def load_files(self):
         files = filedialog.askopenfilenames(filetypes=[("Audio", "*.mp3 *.wav *.flac *.m4a")])
         if files:
-            self.playlist.extend(list(files))
-            if len(self.playlist) == len(files): self.current_index = 0; self.play_index(0)
+            files_list = list(files)
+            new_count = len(files_list)
+            # 将新文件添加到播放列表末尾
+            self.playlist.extend(files_list)
+            # 如果当前没有播放或播放列表只有新添加的歌曲，则播放第一首
+            if self.current_index == -1 or len(self.playlist) == new_count:
+                self.current_index = 0
+                self.play_index(0)
 
     def play_index(self, index):
         if not self.playlist: return
@@ -352,7 +363,11 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
         
         self.lyrics_map, self.time_points = metadata.get_lyrics(path)
         self.active_lyric_index = -1
-        
+
+        # 重置滚动位置
+        self.lyric_scroll_offset = 0
+        self.target_scroll_offset = 0
+
         # 重置滚动位置
         self.lyric_scroll_offset = 0
         self.target_scroll_offset = 0
@@ -408,7 +423,7 @@ class MusicPlayer(ctk.CTk, TkinterDnD.DnDWrapper):
                     for i, t in enumerate(self.time_points):
                         if t <= curr: new_idx = i
                         else: break
-                    
+
                     if new_idx != -1 and new_idx != self.active_lyric_index:
                         self.active_lyric_index = new_idx
                         # 核心：更新目标滚动位置 = 当前索引 * 行高
